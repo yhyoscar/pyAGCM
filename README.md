@@ -1,4 +1,5 @@
-Atmospheric General Circulation Model in Python (pyAGCM)
+#Atmospheric General Circulation Model in Python (pyAGCM)
+
 Contact: yhyoscar@gmail.com Updated: 04/27/2017
 
 Quick start:
