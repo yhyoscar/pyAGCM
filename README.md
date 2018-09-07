@@ -8,5 +8,5 @@ cd ./src;
 
 python main.py
 
-You are welcomed to contact with me for further discussions!
+You are welcomed to contact me for further discussions!
 
