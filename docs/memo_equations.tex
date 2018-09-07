@@ -1,11 +1,617 @@
-\documentclass[10pt,a4paper]{article}
+\documentclass[12pt,a4paper]{book}
+\usepackage[a4paper, total={6.5in, 10in}]{geometry}
 \usepackage[utf8]{inputenc}
 \usepackage{amsmath}
 \usepackage{amsfonts}
 \usepackage{amssymb}
+\usepackage{outline}
+\usepackage{graphicx}
+\usepackage[colorlinks]{hyperref}
+\usepackage[toc]{appendix}
+\renewcommand{\baselinestretch}{1.0}
+
 \begin{document}
+	
+	\title{Spectral Atmospheric General Circulation Model in Python}
+	\author{Haiyang YU\footnote{haiyang.yu@stonybrook.edu} , \
+			Linjiong ZHOU\footnote{linjiong.zhou@noaa.gov} , \
+			Xin XIE\footnote{xin.xie@stonybrook.edu}}
+	\maketitle
 
-adf
+\tableofcontents
 
+%=====================================================================================
+\chapter{Introduction} \label{1.introduction}
+
+
+
+%=====================================================================================
+\chapter{Dynamical Core} \label{2.dynamicalcore}
+
+\section{Vertical Hybrid Coordinate} \label{2.1hybridcoordinate}
+
+In the hybrid coordinate, pressure is a function of surface pressure and hybrid coefficients:
+	\begin{equation} \label{eq:hybridcoord}
+	p(\lambda,\mu,\eta) = A(\eta)p_0 + B(\eta)p_s(\lambda,\mu)	
+	\end{equation}	
+
+Where, $\lambda$ is the longitude, $\mu = \sin \varphi$ (where $\varphi$ is the latitude), $\eta$ varies from 0 at the top of atmosphere (TOA) to 1 at the surface; $p_0$ is defined as $1\times 10^{5}$ Pa. 
+
+From \ref{eq:hybridcoord}, we can also derive the following useful relation:
+	\begin{equation} \label{eq:dpdps}
+	\frac{\partial p}{\partial p_s} = B(\eta) 	
+	\end{equation}	
+
+
+\section{Primitive Equations} \label{2.2governingequations}
+
+The full prognostic equations over a spherical planet with topography written in the vorticity-divergence forms are:	
+	\begin{equation} \label{eq:primitive_vor}
+	\frac{\partial \zeta}{\partial t} = 
+	\frac{1}{a(1-\mu^2)} \frac{\partial n_V}{\partial \lambda}
+	-\frac{1}{a}         \frac{\partial n_U}{\partial \mu} 
+	+ F_{\zeta H} \hspace{19 pc}
+	\end{equation}	
+	\begin{equation} \label{eq:primitive_div}
+	\frac{\partial \delta}{\partial t} = 
+	\frac{1}{a(1-\mu^2)} \frac{\partial n_U}{\partial \lambda}
+	+\frac{1}{a}         \frac{\partial n_V}{\partial \mu} 
+	-\nabla^2 (E + \Phi) 
+	+ F_{\delta H}  \hspace{13 pc}
+	\end{equation}
+	\begin{equation} \label{eq:primitive_T}
+	\frac{\partial T}{\partial t} = 
+	-\frac{1}{a(1-\mu^2)} \frac{\partial (TU)}{\partial \lambda}
+	-\frac{1}{a}          \frac{\partial (TV)}{\partial \mu}
+	+ T\delta 
+	- \dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial T}{\partial p} 
+	+ \frac{RT_v}{c_p^*} \frac{\omega}{p}
+	+ Q + F_{TH} + F_{FH}
+	\end{equation} 
+	\begin{equation} \label{eq:primitive_q}
+	\frac{\partial q}{\partial t} = 
+	-\frac{1}{a(1-\mu^2)} \frac{\partial (qU)}{\partial \lambda}
+	-\frac{1}{a}          \frac{\partial (qV)}{\partial \mu}
+	+ q\delta 
+	- \dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial q}{\partial p} 
+	+ S \hspace{11 pc}
+	\end{equation} 
+	\begin{equation} \label{eq:primitive_lnps}
+	\frac{\partial \ln p_s}{\partial t} = 
+	-\int_{(\eta_t)}^{(1)} \left( \vec{V}\cdot \nabla \ln p_s \right) d\left(\frac{\partial p}{\partial p_s} \right) 
+	-\frac{1}{p_s} \int_{p(\eta_t)}^{p(1)} \delta dp  \hspace{12 pc}
+	\end{equation} 
+
+Where, the prognostic variables:
+
+\hspace{2 pc}  $\zeta$ ------ relative vorticity ($s^{-1}$)
+
+\hspace{2 pc}  $\delta$ ------ divergence ($s^{-1}$)
+
+\hspace{2 pc}  $T$ ------ temperature ($K$)
+
+\hspace{2 pc}  $q$ ------ specific humidity ($kg \ kg^{-1}$)
+
+\hspace{2 pc}  $\ln p_s$ ------ log(surface pressure) ($\ln(Pa)$)
+
+Parameters and other variables:
+
+$a$ ------ the planet radius;
+
+$R$ ------ gas constant;
+
+$f = 2\Omega \sin \varphi$ ------ Coriolis parameter (where $\Omega$ is the angular velocity of the planet); 
+
+$(U,V) = (u \cos\varphi, v \cos\varphi)$ ------ latitude-scaled zonal and meridional wind components; 
+
+$F_{\zeta H}$ ------ vorticity tendency due to horizontal diffusion;
+
+$F_{\delta H}$ ------ divergence tendency due to horizontal diffusion;
+
+$F_{TH}$ ------ temperature tendency due to horizontal diffusion;
+
+$F_{FH}$ ------ frictional heating due to the horizontal diffusion on momentum;
+
+$Q$ ------ temperature tendency due to physical parameterization (diabatic heating);
+
+$S$ ------ moisture tendency due to physical parameterization (source);
+
+$\displaystyle E = \frac{U^2 + V^2}{2(1-\mu^2)}$ ------ kinetic energy;
+
+$\displaystyle \Phi = \Phi_s + R\int_{p(\eta)}^{p(1)} T_v d\ln p$ ------ geopotential, where $\Phi_s$ is the surface geopotential;
+
+$\displaystyle T_v = \left[ 1 + \left( \frac{R_v}{R} -1 \right)q \right] T$ ------ virtual temperature;
+
+$\displaystyle c_p^* = \left[ 1 + \left( \frac{c_{pv}}{c_p} -1 \right)q \right] c_p$ ------ water vapor weighted specific heat;
+
+$\displaystyle \vec{V} \cdot \nabla \ln p_s = \frac{U \partial \ln p_s}{a(1-\mu^2)\partial \lambda} 
++ \frac{V \partial \ln p_s}{a \partial \mu}$ ------ horizontal advection of log(surface pressure);
+
+$\displaystyle n_U = (\zeta + f)V 
+- \dot{\eta}\frac{\partial p}{\partial \eta} \frac{\partial U}{\partial p} 
+- \frac{RT_v}{a} \frac{p_s}{p} \frac{\partial p}{\partial p_s} \frac{\partial \ln p_s}{\partial \lambda} 
++ F_u\cos(\varphi)$
+
+$\displaystyle n_V = -(\zeta + f)U 
+- \dot{\eta}\frac{\partial p}{\partial \eta} \frac{\partial V}{\partial p} 
+- \frac{RT_v}{a} \frac{p_s}{p} \frac{\partial p}{\partial p_s} (1-\mu^2) \frac{\partial \ln p_s}{\partial \mu} 
++ F_v\cos(\varphi)$
+, where $F_u, F_v$ are the tendency of zonal and meridional wind due to the physical parameterization. \\
+
+Diagnostic equations:
+	\begin{equation} \label{eq:verticaladv}
+	\begin{array}{l}
+	\displaystyle 
+	\dot{\eta} \frac{\partial p}{\partial \eta} = 
+	\frac{\partial p}{\partial p_s} \left[ p_s \int_{(\eta_t)}^{(1)} \left( \vec{V} \cdot \nabla \ln p_s \right) d \left( \frac{\partial p}{\partial p_s} \right)  
+	+ \int_{p(\eta_t)}^{p(1)} \delta dp \right] \\
+	\displaystyle 
+	\hspace{4 pc} - \left[ p_s \int_{(\eta_t)}^{(\eta)} \left( \vec{V} \cdot \nabla \ln p_s \right) d \left( \frac{\partial p}{\partial p_s} \right)  
+	+ \int_{p(\eta_t)}^{p(\eta)} \delta dp \right]
+	\end{array}
+	\end{equation}
+
+	\begin{equation} \label{eq:omega}
+	\omega = \frac{\partial p}{\partial p_s} p_s \left( \vec{V} \cdot \nabla \ln p_s \right) 
+	- p_s \int_{(\eta_t)}^{(\eta)} \left( \vec{V} \cdot \nabla \ln p_s \right) d \left( \frac{\partial p}{\partial p_s} \right)
+	- \int_{p(\eta_t)}^{p(\eta)} \delta dp
+	\end{equation}
+
+\section{Vertical Difference Method} \label{2.3verticaldiff}
+
+\subsection{Hybridstatic Equation}	
+
+	Rewriting the multiple variables as column-vectors and the vertical integration as multiplication between a matrix and a column-vector, the hydrostatic equation becomes:
+	\begin{equation} \label{eq:gp}
+	\underline{\Phi}  =  \Phi_s + R \boldsymbol{H} \underline{T_v} 
+	\end{equation}
+where, the underlines represent column-vectors; $\boldsymbol{H}$ is an upper triangular matrix:
+	\begin{equation} \label{eq:matrixH}
+	H_{kl} = \left\lbrace
+	\begin{array}{l}
+	\Delta p_l / p_l,  \hspace{3 pc} (k<l) \\
+	\Delta p_l / (2p_l), \hspace{2 pc} (k=l)
+	\end{array} \right.
+	\end{equation}
+
+
+\subsection{Vertical Advection Equation}
+
+To conserve the kinetic energy during vertical transport, the discrete form of the vertical advection equation of variable X should be:
+	\begin{equation} \label{eq:gp}
+	\left( \dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial X}{\partial p} \right)_k 
+	= \frac{1}{2 \Delta p_k} 
+	\left[ 
+	  \left( \dot{\eta \frac{\partial p}{\partial \eta}} \right)_{k+\frac{1}{2}} \left( X_{k+1} - X_k  \right) 
+	+ \left( \dot{\eta \frac{\partial p}{\partial \eta}} \right)_{k-\frac{1}{2}} \left( X_{k} - X_{k-1}  \right) 
+	\right]
+	\end{equation}
+Where, the $\eta$-coordinate vertical velocity is :
+	\begin{equation} \label{eq:etadot}
+	\left( \dot{\eta} \frac{\partial p}{\partial \eta} \right)_{k+\frac{1}{2}} 
+	= B_{k+\frac{1}{2}} \sum_{l=1}^{K}[\delta_l \Delta p_l + p_s (\vec{V_l} \cdot \nabla \ln p_s) \Delta B_l] 
+	-  \sum_{l=1}^{k}[\delta_l \Delta p_l + p_s (\vec{V_l} \cdot \nabla \ln p_s) \Delta B_l] 
+	\end{equation}
+Note: $\left( \dot{\eta} \frac{\partial p}{\partial \eta} \right)_{\frac{1}{2}} = \left( \dot{\eta} \frac{\partial p}{\partial \eta} \right)_{K+\frac{1}{2}} = 0$.
+
+\subsection{Omega Equation}
+
+	\begin{equation} \label{eq:omega}
+	\omega_k = B_k p_s \vec{V_k} \cdot \nabla \ln p_s 
+	- \sum_{l=1}^{k} C_{kl} [\delta_l \Delta p_l + p_s (\vec{V_l} \cdot \nabla \ln p_s) \Delta B_l]
+	\end{equation}
+Where, $\boldsymbol{C}$ is a lower triangular matrix:
+	\begin{equation} \label{eq:matrixC}
+	C_{kl} = \left\lbrace
+	\begin{array}{l}
+	1,  \hspace{3 pc} (k>l) \\
+	0.5, \hspace{2 pc} (k=l)
+	\end{array} \right.
+	\end{equation}
+Comparing matrix $\boldsymbol{C}$ with matrix $\boldsymbol{H}$, we can easily find their relationship:
+	\begin{equation} \label{eq:HandC}
+	H_{kl} = C_{lk} \frac{\Delta p_l}{p_l}
+	\end{equation}
+	
+
+
+
+\section{Semi-Implicit Time Integration} \label{2.4semi-implicit}
+
+Basically, the idea of semi-implicit time integration is using central difference scheme for nonlinear terms (i.e. slow geostrophic evolution) and backwards difference scheme for linear terms (i.e. fast geostrophic adjusment). Mathematically, the semi-implicit time discrete equation for a variable X can be written as:
+
+	\begin{equation} \label{eq:semi-implicit-x}	
+	\begin{array}{l}
+	\displaystyle 
+	\frac{X^{t+\Delta t} - X^{t-\Delta t}}{2\Delta t} = \boldsymbol{N} (X^t) 
+	+ \boldsymbol{L} (\frac{X^{t-\Delta t} + X^{t + \Delta t}}{2}) \\
+	\displaystyle 
+	\hspace{7 pc}  = \boldsymbol{RHS} (X^t) + \boldsymbol{L} (\frac{X^{t-\Delta t} + X^{t + \Delta t}}{2} - X^t)
+	\end{array}	
+	\end{equation}
+where, $\boldsymbol{RHS} (X)$ represents the right-hand-side of the prognostic equation of X; $\boldsymbol{N} (X)$ represents the nonlinear term, and $\boldsymbol{L} (X)$ represents the linear term; the superscript $t, t-\Delta t, t+\Delta t$ represent the current, backwards, and forwards time step, respectively.
+
+Define the reference temperature profile and reference pressure for linearization:
+	\begin{equation}
+	\begin{array}{l}
+	T(\lambda, \mu, \eta, t) = T^r(\eta) + T'(\lambda, \mu, \eta, t) \\	
+	p(\lambda, \mu, \eta, t) = p^r(\eta) + p'(\lambda, \mu, \eta, t) \\
+	p^r(\eta) = A(\eta)p_0 + B(\eta)p_s^r
+	\end{array}	
+	\end{equation}
+
+Where, the reference surface pressure $p_s^r$ is defined as $1\times 10^{5}$ Pa.
+
+\subsection{Linear Terms in Divergence Equation}
+
+	\begin{equation}	
+	\begin{array}{l}
+	\displaystyle 
+	\hspace{2 pc} -\nabla \cdot \left( \nabla \Phi + RT_v \frac{p_s}{p} \frac{\partial p}{\partial p_s} \nabla \ln p_s  \right) + ... \\
+	\displaystyle 
+	\Rightarrow -R \nabla^2 \int_{p(\eta)}^{p(1)} T_v d\ln p - RT_v \frac{p_s}{p} \frac{\partial p}{\partial p_s} \nabla^2 \ln p_s + ... \\
+	\displaystyle 
+	\Rightarrow -R \int_{p^r}^{p_s^r} \nabla^2 T d\ln p^r - R \int_{p}^{p_s} T^r \nabla^2 d \ln p
+	- RT^r \frac{p_s^r}{p^r} \frac{\partial p}{\partial p_s}   \nabla^2 \ln p_s + ... \\
+	\displaystyle 
+	\Rightarrow -R \int_{p^r}^{p_s^r} \nabla^2 T d\ln p^r - R \int_{(\eta)}^{(1)} T^r \frac{p_s^r}{p^r} d \left( \frac{\partial p}{\partial p_s} \right) \nabla^2 \ln p_s
+	- RT^r \frac{p_s^r}{p^r}  \frac{\partial p}{\partial p_s}   \nabla^2 \ln p_s + ... \\
+	\displaystyle 
+	\Rightarrow -R \boldsymbol{H^r} \nabla^2 \underline{T} - R \left(\underline{b^r} + \underline{h^r} \right) \nabla^2 \ln p_s + ...
+	\end{array}	
+	\end{equation}
+Where, $\boldsymbol{H^r}$ is an upper triangular matrix:
+	\begin{equation} 
+	H^r_{kl} = \left\lbrace
+	\begin{array}{l}
+	\Delta p^r_l / p^r_l,  \hspace{3 pc} (k<l) \\
+	\Delta p^r_l / (2p^r_l), \hspace{2 pc} (k=l)
+	\end{array} \right.
+	\end{equation}
+Column vectors:
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	b^r_k = p^r_s \sum_{l=k+1}^{K} T^r_l \left[ \frac{B_{l+\frac{1}{2}} }{p^r_{l+\frac{1}{2}}} - \frac{B_{l-\frac{1}{2}}}{p^r_{l-\frac{1}{2}}}  \right] \\
+	\displaystyle 
+	h^r_k = T^r_k \frac{p^r_s}{p^r_k} B_k	
+	\end{array} 
+	\end{equation}
+	
+\subsection{Linear Terms in Temperature Equation}
+
+	\begin{equation}	
+	\begin{array}{l}
+	\displaystyle 
+	\hspace{2 pc} -\dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial T}{\partial p} 
+	+ \frac{R T_v}{c_p^*} \frac{\omega}{p} + ...\\
+	\displaystyle 
+	\Rightarrow -\left( \frac{\partial p}{\partial p_s}  \int_{p(\eta_t)}^{p(1)} \delta dp - \int_{p(\eta_t)}^{p(\eta)} \delta dp  \right) \frac{\partial T}{\partial p}
+	- \frac{R T_v}{c_p^* p} \int_{p(\eta_t)}^{p(\eta)} \delta dp + ... \\
+	\displaystyle 
+	\Rightarrow -\left( \frac{\partial p}{\partial p_s}  \int_{p^r(\eta_t)}^{p^r_s} \delta dp^r - \int_{p^r(\eta_t)}^{p^r} \delta dp^r  \right) \frac{\partial T^r}{\partial p}
+		- \frac{R T^r}{c_p p^r} \int_{p^r(\eta_t)}^{p^r} \delta dp^r + ... \\
+	\displaystyle 
+	\Rightarrow -\boldsymbol{D^r} \underline{\delta} + ...
+	\end{array}	
+	\end{equation}
+Where, $\boldsymbol{D^r}$ is a full matrix:
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	D^r_{kl} = \frac{\Delta p^r_l}{2 \Delta p^r_k} \left[ (T^r_k - T^r_{k-1})(B_{k-\frac{1}{2}} 
+	- \epsilon_{kl}) + (T^r_{k+1} - T^r_k)(B_{k+\frac{1}{2}} - \sigma_{kl}) \right]
+	+ \frac{R T^r_k}{c_p} \frac{\Delta p^r_l}{p^r_k} C_{kl} \\
+	\displaystyle 
+	\epsilon_{kl} = \left\lbrace
+	\begin{array}{l}
+	1, \hspace{2 pc}  (k>l) \\
+	0, \hspace{2 pc}  (k \leq l)
+	\end{array} \right. 
+
+	, \hspace{2 pc} \sigma_{kl} = \left\lbrace
+	\begin{array}{l}
+	1, \hspace{2 pc}  (k \geq l) \\
+	0, \hspace{2 pc}  (k<l)
+	\end{array} \right.
+	
+	\end{array} 
+	\end{equation}
+Note: if $\frac{\partial T^r}{\partial p} = 0$, the vertical advection contribution vanishes and $\boldsymbol{D^r}$ becomes a lower triangular matrix, determined by the lower triangular matrix $\boldsymbol{C}$ in previous section.
+
+
+\subsection{Linear Terms in log(surface pressure) Equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	\hspace{2 pc} -\frac{1}{p_s} \int_{p(\eta_t)}^{p(1)} \delta dp + ... \\
+	\displaystyle 
+	\Rightarrow -\frac{1}{p^r_s} (\underline{\Delta p^r} )^T \underline{\delta} + ... \\
+	\end{array} 
+	\end{equation}
+Where, the superscript $T$ means transposing the column vector to a row vector.
+
+
+\subsection{Discrete Equations in Grid Point Space}
+
+	\begin{equation}
+	(\underline{\zeta})^{t+\Delta t} = (\underline{\zeta})^{t-\Delta t} 
+	+ \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{n_V})^t 
+	- (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{n_U})^t \right]
+	+ 2\Delta t \underline{F_{\zeta H}} 
+	\end{equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	(\underline{\delta})^{t+\Delta t} = (\underline{\delta})^{t-\Delta t} 
+	+ \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{n_U})^t 
+	+ (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{n_V})^t \right] \\
+	\displaystyle 
+	\hspace{4 pc} - 2\Delta t \nabla^2 [ (\underline{E})^t +  (\underline{\Phi})^t] \\
+	\displaystyle 
+	\hspace{4 pc} - 2\Delta t R \boldsymbol{H^r} \nabla^2 \left[\frac{(\underline{T})^{t-\Delta t} + (\underline{T})^{t+\Delta t}}{2}  - (\underline{T})^t \right] \\
+	\displaystyle 
+	\hspace{4 pc} - 2\Delta t R (\underline{b^r} + \underline{h^r}) \nabla^2 \left[ \frac{(\ln p_s)^{t-\Delta t} + (\ln p_s)^{t+\Delta t}}{2} - (\ln p_s)^t \right] \\	
+
+	\hspace{4 pc} + 2\Delta t \underline{F_{\delta H}} 
+	\end{array} 
+	\end{equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	(\underline{T})^{t+\Delta t} = (\underline{T})^{t-\Delta t} 
+	- \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{T} \underline{U})^t 
+	+ (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{T} \underline{V})^t \right] \\
+	\displaystyle 
+	\hspace{4 pc} + 2\Delta t \left[ (\underline{T})^t (\underline{\delta})^t + \left(\underline{\frac{RT_v}{c_p^*} \frac{\omega}{p}} \right)^t
+	+ (\underline{Q})^t - (\underline{\dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial T}{\partial p}})^t \right] \\
+	\displaystyle 
+	\hspace{4 pc} - 2\Delta t \boldsymbol{D^r} \left[\frac{(\underline{\delta})^{t-\Delta t} + (\underline{\delta})^{t+\Delta t}}{2}  - (\underline{\delta})^t \right] \\
+	\hspace{4 pc} + 2\Delta t (\underline{F_{TH}}  + \underline{F_{FH}} )
+	\end{array} 
+	\end{equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	(\ln p_s)^{t+\Delta t} = (\ln p_s)^{t-\Delta t} 
+	\displaystyle 
+	- 2\Delta t \left[ (\underline{\vec{V} \cdot \nabla \ln p_s})^{tT} \underline{\Delta B} + \frac{1}{(\underline{p_s})^t} (\underline{\delta})^{tT} (\underline{\Delta p})^t  \right] \\
+	\displaystyle 
+	\hspace{4 pc} - \frac{2\Delta t}{p_s^r} (\underline{\Delta p^r})^T \left[\frac{(\underline{\delta})^{t-\Delta t} + (\underline{\delta})^{t+\Delta t}}{2}  - (\underline{\delta})^t \right] \\
+
+	\end{array} 
+	\end{equation}
+
+\subsection{Discrete Equations in Spectral Space}
+	
+	\begin{equation}
+	(\underline{\zeta_n^m})^{t+\Delta t} = \underline{VS_n^m}  \hspace{14 pc}
+	\end{equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	(\underline{\delta_n^m})^{t+\Delta t} = \underline{DS_n^m} 
+	+ \Delta t R \boldsymbol{H^r} \frac{n(n+1)}{a^2} (\underline{T_n^m})^{t+\Delta t} \\
+	\displaystyle 
+	\hspace{5 pc} + \Delta t R (\underline{b^r} + \underline{h^r}) \frac{n(n+1)}{a^2} [ (\ln p_s)_n^m ] ^{t+\Delta t} 	
+	\end{array} 
+	\end{equation}
+
+	\begin{equation}
+	(\underline{T_n^m})^{t+\Delta t} = \underline{TS_n^m} 
+	- \Delta t \boldsymbol{D^r} (\underline{\delta_n^m})^{t+\Delta t}   \hspace{7 pc}
+	\end{equation}
+
+	\begin{equation}
+	[ (\ln p_s)_n^m ] ^{t+\Delta t} = PS_n^m 
+	- \frac{\Delta t}{p_s^r} (\underline{\Delta p^r})^T (\underline{\delta_n^m})^{t+\Delta t}   \hspace{7 pc}
+	\end{equation}
+
+Where, the first terms on the right-hand-side of the equations are:
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	\underline{VS_n^m} =  \frac{1}{2\pi} \int_{-1}^{1} \int_{0}^{2 \pi} \left\lbrace
+		(\underline{\zeta})^{t-\Delta t} 
+		+ \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{n_V})^t 
+		- (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{n_U})^t \right] \right\rbrace
+	P_n^m(\mu) e^{-im\lambda} d\lambda d\mu \\
+	\displaystyle 
+	\hspace{2 pc} = (\underline{\zeta_n^m})^{t-\Delta t}  + \sum_{j=1}^{J} \left[ 
+		 im \underline{n_V^m(\mu_j)}^t P_n^m(\mu_j) 
+		+   \underline{n_U^m(\mu_j)}^t H_n^m(\mu_j) 
+		\right] \frac{2 \Delta t w_j}{a(1-\mu_j^2)}
+	\end{array} 
+	\end{equation}
+	
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	\underline{DS_n^m} =  \frac{1}{2\pi} \int_{-1}^{1} \int_{0}^{2 \pi} \left\lbrace 
+		(\underline{\delta})^{t-\Delta t} 
+		+ \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{n_U})^t 
+		+ (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{n_V})^t \right]  \right. \\
+		\displaystyle 
+		\hspace{9 pc} - 2\Delta t \nabla^2 [ (\underline{E})^t +  (\underline{\Phi})^t] \\
+		\displaystyle 
+		\hspace{9 pc} - \Delta t R \boldsymbol{H^r} \nabla^2 \left[(\underline{T})^{t-\Delta t}  - 2(\underline{T})^t \right] \\
+		\displaystyle \left. 
+		\hspace{9 pc} - \Delta t R (\underline{b^r} + \underline{h^r}) \nabla^2 \left[ (\ln p_s)^{t-\Delta t} - 2(\ln p_s)^t \right]
+
+	\right \rbrace P_n^m(\mu) e^{-im\lambda} d\lambda d\mu \\
+	\displaystyle 
+	\hspace{2 pc} = (\underline{\delta_n^m})^{t-\Delta t}  + \sum_{j=1}^{J} \left[ 
+		 im \underline{n_U^m(\mu_j)}^t P_n^m(\mu_j) 
+		-   \underline{n_V^m(\mu_j)}^t H_n^m(\mu_j) 
+		\right]	\frac{2 \Delta t w_j}{a(1-\mu_j^2)}  \\
+	\displaystyle 
+    + \frac{n(n+1) \Delta t}{a^2} \left\lbrace 2 [(\underline{E})^t 
+	+  (\underline{\Phi})^t] 
+    + R \boldsymbol{H^r}  \left[ (\underline{T})^{t-\Delta t}  - 2(\underline{T})^t \right] 
+	+  R (\underline{b^r} + \underline{h^r}) \left[ (\ln p_s)^{t-\Delta t} - 2 (\ln p_s)^t \right]
+	 \right\rbrace _n^m	
+	\end{array} 
+	\end{equation}
+
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	\underline{TS_n^m} =  \frac{1}{2\pi} \int_{-1}^{1} \int_{0}^{2 \pi} \left\lbrace
+		(\underline{T})^{t-\Delta t} 
+			- \frac{2\Delta t }{a(1-\mu^2)} \left[ \frac{\partial}{\partial \lambda} (\underline{T} \underline{U})^t 
+			+ (1-\mu^2) \frac{\partial}{\partial \mu} (\underline{T} \underline{V})^t \right] \right. \\
+			\displaystyle 
+			\hspace{4 pc} + 2\Delta t \left[ (\underline{T})^t (\underline{\delta})^t + \left(\underline{\frac{RT_v}{c_p^*} \frac{\omega}{p}} \right)^t
+			+ (\underline{Q})^t - (\underline{\dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial T}{\partial p}})^t \right] \\
+			\displaystyle  \left.
+			\hspace{4 pc} - \Delta t \boldsymbol{D^r} \left[(\underline{\delta})^{t-\Delta t}  - 2(\underline{\delta})^t \right] \right\rbrace
+	P_n^m(\mu) e^{-im\lambda} d\lambda d\mu \\
+	\displaystyle 
+	\hspace{2 pc} = (\underline{T_n^m})^{t-\Delta t}  - \sum_{j=1}^{J} \left[ 
+		 im \underline{(TU)^m(\mu_j)}^t P_n^m(\mu_j) 
+		-   \underline{(TV)^m(\mu_j)}^t H_n^m(\mu_j) 
+		\right] \frac{2 \Delta t w_j}{a(1-\mu_j^2)} \\
+		\displaystyle 
+		+ \left\lbrace 2\Delta t \left[ (\underline{T})^t (\underline{\delta})^t + \left(\underline{\frac{RT_v}{c_p^*} \frac{\omega}{p}} \right)^t
+		+ (\underline{Q})^t - (\underline{\dot{\eta} \frac{\partial p}{\partial \eta} \frac{\partial T}{\partial p}})^t \right] 
+		- \Delta t \boldsymbol{D^r} \left[(\underline{\delta})^{t-\Delta t}  - 2(\underline{\delta})^t \right] \right\rbrace_n^m
+	\end{array} 
+	\end{equation}
+	
+	\begin{equation}
+	\begin{array}{l}
+	\displaystyle 
+	PS_n^m = \left\lbrace (\ln p_s)^{t-\Delta t} 
+	\displaystyle 
+	- 2\Delta t \left[ (\underline{\vec{V} \cdot \nabla \ln p_s})^{tT} \underline{\Delta B} 
+	+ \frac{1}{(\underline{p_s})^t} (\underline{\delta})^{tT} (\underline{\Delta p})^t  \right] \right. \\
+	\displaystyle \left.
+	\hspace{4 pc} - \frac{\Delta t}{p_s^r} (\underline{\Delta p^r})^T \left[(\underline{\delta})^{t-\Delta t} - 2(\underline{\delta})^t \right] \right\rbrace _n^m \\
+
+	\end{array} 
+	\end{equation}	
+	
+Substituting the temperature and log(surface pressure) equation into divergence equation yields the Helmholtz equation:
+	\begin{equation}
+	\boldsymbol{A}_n (\underline{\delta_n^m})^{t+\Delta t} = \underline{DS_n^m} + \Delta t \frac{n(n+1)}{a^2} 
+	\left[ R\boldsymbol{H^r} \underline{TS_n^m} + R(\underline{b^r} + \underline{h^r}) PS_n^m \right] 
+	\end{equation}	
+Where, 
+	\begin{equation}
+	\boldsymbol{A}_n = \boldsymbol{I} + \Delta t^2 \frac{n(n+1)}{a^2} 
+	\left[ R\boldsymbol{H^r} \boldsymbol{D^r} + R(\underline{b^r} + \underline{h^r}) (\underline{\Delta p^r})^T \frac{1}{p_s^r} \right] 
+	\end{equation}	
+Note: $\underline{\delta_0^0} = 0$.
+
+
+%=====================================================================================
+\chapter{Physical Parameterization} \label{3.physics}
+
+
+%=====================================================================================
+\chapter{Test Cases} \label{4.testcases}
+
+
+%%============================================================================
+\appendix
+%\appendixpageoff
+\renewcommand{\theequation}{\Alph{chapter}.\arabic{equation}}
+
+\chapter{Spectral Transform Method}  \label{appendixA.spectraltransform}
+
+\section{Spherical harmonic transform (from physical space to spectral space)}
+
+The spherical harmonic transform contains two steps:
+
+1) Fourier transform:
+	\begin{equation}  \label{eq:fft}
+	A^m(\mu) = \frac{1}{2\pi} \int_0^{2\pi} A(\lambda, \mu ) e^{-im\lambda} d\lambda 
+	\end{equation}
+
+2) Legendre transform:
+	\begin{equation} \label{eq:legendre}
+	A_n^m = \int_{-1}^1 A^m(\mu) P_n^m(\mu) d\mu
+	\end{equation}
+
+where, $P_n^m(\mu)$ is the normalized associated Legendre polynomial.
+
+Combining step 1) and 2), the spherical harmonic transform can be written as:
+	\begin{equation} \label{eq:harmonic}
+	A_n^m = \frac{1}{2\pi} \int_{-1}^1 \int_0^{2\pi} A(\lambda, \mu ) Y_n^{m*}(\lambda, \mu) d\lambda d\mu
+	\end{equation} 
+
+Where, $Y_n^{m*}(\lambda, \mu) = P_n^m(\mu ) e^{-im\lambda}$ is the conjugate spherical harmonic function.
+
+Practically, step 1) and 2) are performed discretely as:
+	\begin{equation} \label{eq:disfft}
+		A^m(\mu_j) = \frac{1}{2\pi} \sum_{i=1}^I A(\lambda_i, \mu_j) e^{-\textbf{i}m\lambda_i}
+	\end{equation}	
+	
+	\begin{equation} \label{eq:dislegendre}
+		A_n^m = \sum_{j=1}^J A^m(\mu_j) P_n^m(\mu_j) w(\mu_j)
+	\end{equation}
+
+Where, $\textbf{i} = \sqrt{-1}$;  i and j are the indexes of longitude and latitude; $w(\mu_j)$ are the Gaussian weights.
+
+\section{Inverse spherical harmonic transform (from spectral space to physical space)}
+
+The spherical harmonic transform also contains two steps, but in discrete form only:
+
+1) Inverse Legendre transform:
+	\begin{equation}	
+	A^m(\mu) = \sum\limits_{n=|m|}^N  A_n^m P_n^m(\mu)		
+	\end{equation}
+
+Note: $A^{-m}(\mu)$ is conjugate to $A^m(\mu)$.
+
+2) Inverse Fourier transform:
+	\begin{equation}	
+	A(\lambda, \mu) = Re\left[\sum_{m=-M}^M A^m(\mu)	e^{\textbf{i}m\lambda} \right] 
+	\end{equation}
+
+Where, $Re$ means using the real part only. 
+
+%====================================================================================
+\chapter{Normalized Associated Legendre Polynomial Functions} \label{appendixC.legendre}
+
+The normalized associated Legendre polynomial functions are generated according the following steps:
+
+	\begin{equation}  \label{eq:c1}
+	\displaystyle P_0^0 = 1/\sqrt{2}
+	\end{equation}	
+
+	\begin{equation}  \label{eq:c2}
+	\displaystyle P_m^m(x) = -\sqrt{\frac{2m+1}{2m}} \sqrt{1-x^2} P_{m-1}^{m-1}(x)
+	\end{equation}	
+
+	\begin{equation}  \label{eq:c3}
+	\displaystyle P_m^{m-1}(x) = x \sqrt{2m+1}  P_{m-1}^{m-1}(x)
+	\end{equation}	
+
+	\begin{equation}  \label{eq:c4}
+	\begin{array}{l}
+	\displaystyle \epsilon_{n+1}^m P_{n+1}^{m}(x) = x P_n^m(x) - \epsilon_n^m P_{n-1}^m(x) \\
+	\displaystyle \epsilon_n^m = \sqrt{\frac{n^2-m^2}{4n^2-1}} 
+	\end{array}
+	\end{equation}	
+
+The first derivative of the normalized associated Legendre polynomial functions are generated according the following steps:
+
+	\begin{equation}  \label{eq:c5}
+	\displaystyle H_n^m = (1-x^2)\frac{dP_n^m(x)}{dx} = (2n+1)\epsilon_n^m P_{n-1}^m(x) - nxP_n^m(x)
+	\end{equation}	
+
+	\begin{equation}  \label{eq:c6}
+	\displaystyle H_m^m = (1-x^2)\frac{dP_m^m(x)}{dx} = -mxP_m^m(x)
+	\end{equation}	
+	
+	
 
 \end{document}
